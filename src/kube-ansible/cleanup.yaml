@@ -1,0 +1,28 @@
+---
+- name: Cleanup
+  hosts: localhost
+  tasks:
+    - name: Clean up the certificate authority
+      file:
+        path: etcd-ca
+        state: absent
+    - name: Clean up apiserver-etcd-client.crt
+      file:
+        path: apiserver-etcd-client.crt
+        state: absent
+    - name: Clean up apiserver-etcd-client.key
+      file:
+        path: apiserver-etcd-client.key
+        state: absent
+    - name: Clean up the cryptographic files
+      file:
+        path: k8s-pki
+        state: absent
+    - name: Clean up the master join command script
+      file:
+        path: master.join.sh
+        state: absent
+    - name: Clean up the worker join command script
+      file:
+        path: worker.join.sh
+        state: absent

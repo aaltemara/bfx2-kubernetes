@@ -1,0 +1,21 @@
+#!/bin/bash
+# create contexts for each environment and default
+
+
+ENVIRONMENTS="dev int itest qa"
+ENV_PREFIX="shared1-"
+
+create_context() {
+    local namespace=$1
+    kubectl config set-context ${namespace} --cluster=${KCLUSTER} --user=${KUSER} --namespace=$namespace
+}
+
+
+KCLUSTER=$(kubectl config view --output json | jq '.contexts[0].context.cluster' -r)
+KUSER=$(kubectl config view --output json | jq '.users[0].name' -r)
+
+for e in $ENVIRONMENTS; do
+    namespace=${ENV_PREFIX}${e}
+    create_context $namespace
+done
+create_context default

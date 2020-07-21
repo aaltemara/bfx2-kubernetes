@@ -1,0 +1,15 @@
+#!/bin/bash
+
+UCP_HOST=ea-ucp-dev1.eacc.ds.quintiles.com
+
+if [[ $UCP_AUTHTOKEN ]]; then
+  if curl --insecure -X GET "https://$UCP_HOST/api/ucp/config-toml" -H  "accept: application/toml" -H  "Authorization: Bearer $UCP_AUTHTOKEN" > ucp-config.toml; then
+    echo "Downloaded UCP config successfully to ucp-config.toml"
+  else 
+    echo "Problem downloading UCP config"
+    exit 1
+  fi 
+else
+  echo "Set UCP_AUTHTOKEN and execute"
+  exit 1
+fi

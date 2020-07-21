@@ -1,0 +1,1 @@
+for e in dev int itest qa; do for n in 1 2 3; do for v in 1 2 3 4 5 6 7 8 9; do echo vspv-$e-$n$v.vmdk; done; done; done

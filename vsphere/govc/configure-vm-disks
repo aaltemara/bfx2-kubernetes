@@ -1,0 +1,7 @@
+#!/bin/bash
+# Configures given VMs for attaching Kubernetes persistent volumes
+# Accepts VM names
+
+for vm in "$@"; do
+  govc vm.change -e="disk.enableUUID=1" -vm=$vm
+done

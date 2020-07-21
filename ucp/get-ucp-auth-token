@@ -1,0 +1,13 @@
+
+UCP_HOST=ea-ucp-dev1.eacc.ds.quintiles.com
+read -p "Enter UCP Username: " user
+read -sp "Enter UCP Password: " password
+
+UCP_AUTHTOKEN=$(curl --insecure --data "{\"username\":\"$user\",\"password\":\"$password\"}" https://$UCP_HOST/auth/login | jq --raw-output .auth_token)
+
+if [[ $UCP_AUTHTOKEN && $UCP_AUTHTOKEN != null ]]; then
+  export UCP_AUTHTOKEN
+  echo "Set UCP_AUTHTOKEN=$UCP_AUTHTOKEN"
+else
+  echo "Problem getting auth token"
+fi

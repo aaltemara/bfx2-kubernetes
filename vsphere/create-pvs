@@ -1,0 +1,75 @@
+#!/bin/bash
+# Gen PVs for all vpvs / environments
+# Don't generate PVCs, as our apps will do that
+
+## Config
+
+DATASTORE_INTS="1 2 3 4 5 6 7 8 9"
+INTS_PER_DATASTORE="1 2 3 4"
+
+DATASTORE_PREFIX="cmp1/cmpds"
+VMDK_PREFIX="volumes/vspv-"
+NAMESPACE_PREFIX="shared1-"
+
+PV_PREFIX="vspv-"
+PVC_PREFIX="pvc-"
+
+DATASTORE_SIZE=21Gi
+
+
+## Functions
+
+# Create Given PV of given Vsphere Datastore and VMDK name, within given Kubernetes Environment in the name
+create_pv() {
+    pv=$1
+    datastore=$2
+    vmdk_path=$3
+
+echo "PV $pv ($DATASTORE_SIZE) - $datastore - $vmdk_path"
+cat <<HERE | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: $pv
+spec:
+  capacity:
+    storage: $DATASTORE_SIZE
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  vsphereVolume:
+    volumePath: "[$datastore] $vmdk_path"
+    fsType: ext4
+HERE
+
+}
+
+# Example PVC
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  namespace: $namespace
+#  name: $pvc-$environment
+#  labels:
+#    environment: $environment
+#    name: $pvc-$environment
+#spec:
+#  accessModes:
+#    - ReadWriteOnce
+#  resources:
+#    requests:
+#      storage: $PVC_SIZE
+
+
+## Main
+
+# Create PVC
+for datastore_int in $DATASTORE_INTS; do
+    for int in $INTS_PER_DATASTORE; do
+        pv="${PV_PREFIX}${datastore_int}${int}"
+        datastore="$DATASTORE_PREFIX${datastore_int}"
+        vmdk=${VMDK_PREFIX}${int}${datastore_int}
+
+        create_pv ${pv} ${datastore} ${vmdk}
+    done
+done

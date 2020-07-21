@@ -1,0 +1,38 @@
+#!/bin/bash
+# Install zookeeper into a given Kubernetes namespace
+# Requires the kubectl contexts set up for the given namespace, named as that namespace
+
+
+## Config
+
+## Functions
+die() { echo "$@"; exit 1; }
+
+
+## Main
+namespace=$1
+[[ $namespace ]] \
+    || { echo "Usage: $0 NAMESPACE"; exit 1; }
+
+
+kubectl config use-context default \
+    || die "Could not use context default. Ensure you have this namespace configured as a context named after the namespace"
+
+if helm list --namespace default | grep -qP "zookeeper-operator.*default"; then
+    echo "zookeeper-operator is already installed in namespace: default. Not doing it again"
+else
+    helm install zookeeper-operator banzaicloud-stable/zookeeper-operator \
+        || die "Could not install zookeeper-operator"
+fi
+
+kubectl config use-context $namespace \
+    || die "Could not use context $namespace. Ensure you have this namespace configured as a context named after the namespace"
+
+cat <<HERE | kubectl create -f -
+apiVersion: zookeeper.pravega.io/v1beta1
+kind: ZookeeperCluster
+metadata:
+  name: zookeeper
+spec:
+  replicas: 3
+HERE

@@ -1,0 +1,19 @@
+---
+apiVersion: kubeadm.k8s.io/v1alpha3
+kind: ClusterConfiguration
+kubernetesVersion: 1.13.9
+apiServerCertSANs:
+  - "{{hostvars[groups['ingress_hosts'][0]]['ansible_default_ipv4']['address']}}"
+controlPlaneEndpoint: "{{hostvars[groups['ingress_hosts'][0]]['ansible_default_ipv4']['address']}}:6443"
+etcd:
+  external:
+    endpoints:
+{% for etcd_host in groups['etcd_hosts'] %}
+      - https://{{hostvars[etcd_host]['ansible_default_ipv4']['address']}}:2379
+{% endfor %}
+    caFile: /etc/kubernetes/pki/etcd/ca.crt
+    certFile: /etc/kubernetes/pki/apiserver-etcd-client.crt
+    keyFile: /etc/kubernetes/pki/apiserver-etcd-client.key
+networking:
+  podSubnet: "172.16.0.0/16"
+  serviceSubnet: "172.16.0.0/16"

@@ -1,0 +1,10 @@
+---
+- name: Remove any existing Kubernetes cluster
+  hosts: master_hosts:worker_hosts
+  remote_user: root
+  gather_facts: no
+  tasks:
+    - name: Reset the Kubernetes cluster if necessary
+      command: kubeadm reset -f
+      args:
+        removes: /etc/kubernetes/pki/ca.crt

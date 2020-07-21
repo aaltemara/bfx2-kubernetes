@@ -1,0 +1,19 @@
+---
+apiVersion: kubeadm.k8s.io/v1alpha3
+kind: ClusterConfiguration
+etcd:
+  local:
+    serverCertSANs:
+      - "{{ansible_host}}"
+    peerCertSANs:
+      - "{{ansible_host}}"
+    extraArgs:
+      initial-cluster: {% for etcd_host in groups['etcd_hosts'] %}infra{{loop.index0}}=https://{{hostvars[etcd_host]['ansible_default_ipv4']['address']}}:2380{% if not loop.last %},{% endif %}{% endfor %}
+
+      initial-cluster-state: new
+      name: {% for etcd_host in groups['etcd_hosts'] %}{% if etcd_host == inventory_hostname %}infra{{loop.index0}}{% endif %}{% endfor %}
+
+      listen-peer-urls: https://{{ansible_host}}:2380
+      listen-client-urls: https://{{ansible_host}}:2379
+      advertise-client-urls: https://{{ansible_host}}:2379
+      initial-advertise-peer-urls: https://{{ansible_host}}:2380

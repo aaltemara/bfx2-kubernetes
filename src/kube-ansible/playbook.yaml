@@ -1,0 +1,371 @@
+---
+- name: Prepare all hosts
+  hosts: all
+  remote_user: root
+  tasks:
+    - name: Ensure SeLinux is in permissive mode
+      selinux:
+        state: permissive
+        policy: targeted
+    - name: Disable firewalld
+      systemd:
+        name: firewalld
+        state: stopped
+        enabled: false
+    - name: Update all software
+      yum:
+        name: "*"
+        state: latest
+- name: Prepare all hosts but the ingress
+  hosts: master_hosts:etcd_hosts:worker_hosts
+  remote_user: root
+  tasks:
+    - name: Install ea-host package
+      yum:
+        name: ea-host
+        state: latest
+    - name: Install Docker Installer package
+      yum:
+        name: ea-docker-installer
+        state: latest
+    - name: Install Docker
+      command: /opt/ea/bin/install-docker
+    - name: Start Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+    - name: Check to see if swap is enabled
+      command: swapon --noheadings --show=NAME
+      register: swapdev
+    - name: Disable swap since kubernetes can't work with swap enabled
+      command: swapoff -a
+      when: swapdev.stdout|length
+    - name: Disable swap in fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#]+\sswap\s+sw.*)$'
+        replace: '# \1'
+      when: swapdev.stdout|length
+#   - name: Disable swap in systemd
+#     systemd:
+#       name: "dev-{{swapdev.stdout[5:]}}.swap"
+#       masked: yes
+#     when: swapdev.stdout|length
+    - name: Add Google Kubernetes yum repository
+      yum_repository:
+        name: Kubernetes
+        description: Google Kubernetes repo
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+        gpgcheck: yes
+        repo_gpgcheck: yes
+        gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+        exclude: kube*
+    - name: Install Kubernetes
+      yum:
+        name: "{{packages}}"
+        disable_excludes: all
+      vars:
+        packages:
+          - kubeadm-1.13.9
+          - kubectl-1.13.9
+          - kubelet-1.13.9
+          - kubernetes-cni-0.6.0
+    - name: Enable kubelet
+      systemd:
+        name: kubelet
+        enabled: true
+- name: Prepare ingress
+  hosts: ingress_hosts
+  remote_user: root
+  tasks:
+    - name: Install nginx
+      yum:
+        name: nginx
+    - name: Configure nginx
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+      notify: Enable nginx
+  handlers:
+    - name: Enable nginx
+      systemd:
+        name: nginx
+        daemon_reload: yes
+        state: restarted
+        enabled: true
+- name: Prepare etcd
+  hosts: etcd_hosts
+  remote_user: root
+  tasks:
+    - name: Configure the kubelet to be a service manager for etcd
+      copy:
+        src: 20-etcd-service-manager.conf
+        dest: /usr/lib/systemd/system/kubelet.service.d/20-etcd-service-manager.conf
+      notify: Restart kubelet
+    - name: Create configuration files for kubeadm
+      template:
+        src: etcd.kubeadmcfg.yaml.j2
+        dest: /tmp/kubeadmcfg.yaml
+  handlers:
+    - name: Restart kubelet
+      systemd:
+        name: kubelet
+        daemon_reload: yes
+        state: restarted
+        enabled: true
+- name: Create a CA
+  hosts: etcd_hosts[0]
+  remote_user: root
+  tasks:
+    - name: Generate the certificate authority
+      command: kubeadm init phase certs etcd-ca
+      args:
+        creates: /etc/kubernetes/pki/etcd/ca.crt
+    - name: Create a temporary directory
+      tempfile:
+        state: directory
+      register: tempdir
+    - name: Archive the certificate authority
+      archive:
+        path: /etc/kubernetes/pki/
+        dest: "{{tempdir.path}}/etcd-ca"
+    - name: Download the certificate authority archive
+      fetch:
+        src: "{{tempdir.path}}/etcd-ca"
+        dest: etcd-ca
+        flat: yes
+    - name: Delete the certificate authority archive
+      file:
+        path: "{{tempdir.path}}"
+        state: absent
+- name: Distribute the CA
+  hosts: etcd_hosts
+  remote_user: root
+  tasks:
+    - name: Create Kubernetes certificate directory
+      file:
+        path: /etc/kubernetes/pki/
+        state: directory
+    - name: Unarchive the certificate authority
+      unarchive:
+        src: etcd-ca
+        dest: /etc/kubernetes/pki/
+        creates: /etc/kubernetes/pki/etcd/ca.crt
+    - name: Create etcd-server certificate
+      command: kubeadm init phase certs etcd-server --config=/tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/pki/etcd/server.crt
+    - name: Create etcd-peer certificate
+      command: kubeadm init phase certs etcd-peer --config=/tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/pki/etcd/peer.crt
+    - name: Create etcd-healthcheck-client certificate
+      command: kubeadm init phase certs etcd-healthcheck-client --config=/tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/pki/etcd/healthcheck-client.crt
+    - name: Create apiserver-etcd-client certificate
+      command: kubeadm init phase certs apiserver-etcd-client --config=/tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/pki/apiserver-etcd-client.crt
+    - name: Create the static pod manifests
+      command: kubeadm init phase etcd local --config=/tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/manifests/etcd.yaml
+    - name: Ensure the kubelet is running
+      systemd:
+        name: kubelet
+        state: started
+        enabled: true
+- name: Get etcd client files
+  hosts: etcd_hosts[0]
+  remote_user: root
+  tasks:
+    - name: Get /etc/kubernetes/pki/apiserver-etcd-client.crt
+      fetch:
+        src: /etc/kubernetes/pki/apiserver-etcd-client.crt
+        dest: ./
+        flat: yes
+    - name: Get /etc/kubernetes/pki/apiserver-etcd-client.key
+      fetch:
+        src: /etc/kubernetes/pki/apiserver-etcd-client.key
+        dest: ./
+        flat: yes
+- name: Get cluster facts
+  hosts: all
+  tags:
+    - always
+  tasks:
+    - name:
+      setup: 
+      become: true
+- name: Setup Master Hosts
+  hosts: master_hosts
+  remote_user: root
+  gather_facts: yes
+  tasks:
+    - name: Create Kubernetes certificate directory
+      file:
+        path: /etc/kubernetes/pki/
+        state: directory
+    - name: Copy ca.crt
+      unarchive:
+        src: etcd-ca
+        dest: /etc/kubernetes/pki/
+        exclude:
+          - etcd/ca.key
+          - etcd/healthcheck-client.crt
+          - etcd/healthcheck-client.key
+          - etcd/peer.crt
+          - etcd/peer.key
+          - etcd/server.crt
+          - etcd/server.key
+        creates: /etc/kubernetes/pki/etcd/ca.crt
+    - name: Copy /etc/kubernetes/pki/apiserver-etcd-client.crt
+      copy:
+        src: apiserver-etcd-client.crt
+        dest: /etc/kubernetes/pki/apiserver-etcd-client.crt
+    - name: Copy /etc/kubernetes/pki/apiserver-etcd-client.key
+      copy:
+        src: apiserver-etcd-client.key
+        dest: /etc/kubernetes/pki/apiserver-etcd-client.key
+    - name: Create configuration files for kubeadm
+      template:
+        src: master.kubeadmcfg.yaml.j2
+        dest: /tmp/kubeadmcfg.yaml
+- name: Setup Control Plane
+  hosts: master_hosts[0]
+  remote_user: root
+  tasks:
+    - name: Install pip to use Python libraries
+      yum:
+        name: python-pip
+    - name: Upgrade pip and setuptools to recent version
+      pip:
+        name: "{{packages}}"
+        extra_args: --upgrade
+      vars:
+        packages:
+          - pip
+          - setuptools
+    - name: Install openshift Python library to use k8s Ansible module
+      pip:
+        name: openshift
+        extra_args: --user
+    - name: Initialize the Kubernetes cluster
+      command: kubeadm init --config /tmp/kubeadmcfg.yaml
+      #command: kubeadm init --ignore-preflight-errors 'FileAvailable--etc-kubernetes-manifests-etcd.yaml,Port-10250,DirAvailable--etc-kubernetes-manifests' --config /tmp/kubeadmcfg.yaml
+      args:
+        creates: /etc/kubernetes/pki/ca.crt
+    - name: Get command to join cluster
+      command: kubeadm token create --print-join-command
+      register: kubeadm_join
+    - name: Preserve the command for master nodes to join the new cluster
+      template:
+        src: master.join.sh.j2
+        dest: master.join.sh
+      delegate_to: localhost
+    - name: Preserve the command for worker nodes to join the new cluster
+      template:
+        src: worker.join.sh.j2
+        dest: worker.join.sh
+      delegate_to: localhost
+    - name: Create a temporary directory
+      tempfile:
+        state: directory
+      register: tempdir
+    - name: Archive the cryptographic files
+      archive:
+        path:
+          - /etc/kubernetes/pki/ca.crt
+          - /etc/kubernetes/pki/ca.key
+          - /etc/kubernetes/pki/sa.key
+          - /etc/kubernetes/pki/sa.pub
+          - /etc/kubernetes/pki/front-proxy-ca.crt
+          - /etc/kubernetes/pki/front-proxy-ca.key
+        dest: "{{tempdir.path}}/k8s-pki"
+    - name: Download the cryptographic archive
+      fetch:
+        src: "{{tempdir.path}}/k8s-pki"
+        dest: k8s-pki
+        flat: yes
+    - name: Upload calico-rbac.yaml
+      copy:
+        src: calico-rbac.yaml
+        dest: "{{tempdir.path}}/calico-rbac.yaml"
+    - name: Apply calico-rbac.yaml
+      k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        src: "{{tempdir.path}}/calico-rbac.yaml"
+    - name: Upload calico.yaml
+      copy:
+        src: calico.yaml
+        dest: "{{tempdir.path}}/calico.yaml"
+    - name: Apply calico.yaml
+      k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        src: "{{tempdir.path}}/calico.yaml"
+    - name: Delete the temporary directory
+      file:
+        path: "{{tempdir.path}}"
+        state: absent
+- name: Setup the other control plane nodes
+  hosts: master_hosts[1:]
+  remote_user: root
+  tasks:
+    - name: Unarchive the cryptographic files
+      unarchive:
+        src: k8s-pki
+        dest: /etc/kubernetes/pki/
+        creates: /etc/kubernetes/pki/ca.crt
+    - name: Copy the join command
+      copy:
+        src: master.join.sh
+        dest: /tmp/join.sh
+        mode: u+rx
+    - name: Join the cluster
+      command: /tmp/join.sh
+      #command: /tmp/join.sh --ignore-preflight-errors 'FileAvailable--etc-kubernetes-manifests-etcd.yaml,Port-10250,DirAvailable--etc-kubernetes-manifests'
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+- name: Setup the worker nodes
+  hosts: worker_hosts
+  remote_user: root
+  tasks:
+    - name: Copy the join command
+      copy:
+        src: worker.join.sh
+        dest: /tmp/join.sh
+        mode: u+rx
+    - name: Join the cluster
+      command: /tmp/join.sh
+      #command: /tmp/join.sh --ignore-preflight-errors 'FileAvailable--etc-kubernetes-manifests-etcd.yaml,Port-10250,DirAvailable--etc-kubernetes-manifests'
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+- name: Cleanup
+  hosts: localhost
+  tasks:
+    - name: Clean up the certificate authority
+      file:
+        path: etcd-ca
+        state: absent
+    - name: Clean up apiserver-etcd-client.crt
+      file:
+        path: apiserver-etcd-client.crt
+        state: absent
+    - name: Clean up apiserver-etcd-client.key
+      file:
+        path: apiserver-etcd-client.key
+        state: absent
+    - name: Clean up the cryptographic files
+      file:
+        path: k8s-pki
+        state: absent
+    - name: Clean up the master join command script
+      file:
+        path: master.join.sh
+        state: absent
+    - name: Clean up the worker join command script
+      file:
+        path: worker.join.sh
+        state: absent

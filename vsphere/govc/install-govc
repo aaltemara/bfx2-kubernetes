@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Reference:
+# govc Releases: https://github.com/vmware/govmomi/releases
+
+URL_TO_BINARY=https://github.com/vmware/govmomi/releases/download/v0.23.0/govc_linux_amd64.gz
+
+curl -L $URL_TO_BINARY | gunzip > /usr/local/bin/govc
+chmod a+x /usr/local/bin/govc
+

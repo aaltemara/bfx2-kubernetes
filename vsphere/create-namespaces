@@ -1,0 +1,39 @@
+#!/bin/bash
+# Gen Kubernetes namespaces for all environments
+
+## Config
+
+ENVS="dev int itest qa"
+NAMESPACE_PREFIX="shared1-"
+
+
+## Functions
+
+# Create Given Kubernetes Namespace
+# Args: NAMESPACE
+create_namespace() {
+    namespace=$1
+
+    echo "Creating Kubernetes namespace: $namespace"
+cat <<HERE | kubectl create -f -
+{
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+        "name": "$namespace",
+        "labels": {
+            "name": "$namespace"
+        }
+    }
+}
+HERE
+}
+
+
+## Main
+
+# Create PVC
+for e in $ENVS; do
+    create_namespace ${NAMESPACE_PREFIX}${e}
+done
+
