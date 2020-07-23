@@ -1,0 +1,16 @@
+#!/bin/bash
+
+
+envs="default shared1-dev shared1-int shared1-itest shared1-qa"
+types="ClusterRole ClusterRoleBinding CustomResourceDefinition Deployment RoleBinding ServiceAccount"
+
+for e in $envs; do
+    if kubectl config use-context $e; then
+        for t in $types; do
+            kubectl get $t | grep strimzi | cut -f1 -d' ' | xargs --no-run-if-empty -n 1 kubectl delete $t
+        done
+    else
+        echo "Could not use context: $e"
+    fi
+done
+

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+namespace=default
+
+cd strimzi-kafka-operator
+
+kubectl config use-context default
+
+sed -i 's/namespace: .*/namespace: default/' install/cluster-operator/*RoleBinding*.yaml
+
+kubectl create clusterrolebinding strimzi-cluster-operator-namespaced --clusterrole=strimzi-cluster-operator-namespaced --serviceaccount $namespace:strimzi-cluster-operator
+kubectl create clusterrolebinding strimzi-cluster-operator-entity-operator-delegation --clusterrole=strimzi-entity-operator --serviceaccount $namespace:strimzi-cluster-operator
+kubectl create clusterrolebinding strimzi-cluster-operator-topic-operator-delegation --clusterrole=strimzi-topic-operator --serviceaccount $namespace:strimzi-cluster-operator
+
+kubectl apply -f install/cluster-operator -n default
